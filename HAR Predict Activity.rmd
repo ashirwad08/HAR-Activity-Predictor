@@ -1,0 +1,48 @@
+---
+title: "HAR Predict Activity"
+author: "Ash Chakraborty"
+date: "December 21, 2015"
+output: html_document
+---  
+
+```{r global ECHO=FALSE, message=FALSE, warning=FALSE, error=FALSE}
+library(caret)
+library(ggplot2)
+library(GGally)
+library(foreach)
+library(doParallel)
+train.url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+test.url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+```  
+
+# OVERVIEW  
+
+"Human Activity Recognition" (HAR) exercise. Use data collected from a wearable
+device to train a couple of machine learning models so that they can "learn" to
+predict the "type" of activity ('classe') given a test data set.  
+
+The link and the project are here: http://groupware.les.inf.puc-rio.br/har
+
+# DATA PREVIEW  
+
+Training data is at: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv  
+
+We'll need a cross validation set, since the testing set is provided separately, here: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+So, let's read in data, and create a Cross Validation set:  
+
+```{r}
+raw <- read.csv(train.url, header = T, na.strings = c(""," ","#DIV/0!","NA"))
+trainInds <- createDataPartition(raw$classe, p=.7, list = F)
+train <- raw[trainInds, -c(1:4)] #names, ids, timestamps aren't good predictors
+cv <- raw[-trainInds, -c(1:4)]
+
+```
+
+You can also embed plots, for example:
+
+```{r, echo=FALSE}
+plot(cars)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
