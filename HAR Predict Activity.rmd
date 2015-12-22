@@ -33,16 +33,37 @@ So, let's read in data, and create a Cross Validation set:
 
 ```{r}
 raw <- read.csv(train.url, header = T, na.strings = c(""," ","#DIV/0!","NA"))
+
 trainInds <- createDataPartition(raw$classe, p=.7, list = F)
-train <- raw[trainInds, -c(1:4)] #names, ids, timestamps aren't good predictors
-cv <- raw[-trainInds, -c(1:4)]
+train <- raw[trainInds, -c(1:5)] #names, ids, timestamps aren't good predictors
+cv <- raw[-trainInds, -c(1:5)]
+
+```  
+
+Exploratory steps:  
+
+* Get a handle on numerics, discrete, continuous variables
+* What can we remove?
+** Ids, names and shit
+** Too many NAs
+** Near Zero Variance variables
+* What else can we remove/create on the features?
+** Manual correlations against outcome (scattermatrix) by groups
+** Collinearity checks (VIF?)
+** PCA on similar measures?
+
+```{r}
+# training set cleaning and analysis
+# consider removing NZVs
+train <- train[,-nearZeroVar(train, saveMetrics = F)]
+
+# Impute NAs; NZV has also removed some NAs. I want to remove variables where
+# more than 80% of the values are unknown.
+train <- train[, -which(colSums(is.na(train))/nrow(train) > 0.8)]
+
 
 ```
 
-You can also embed plots, for example:
 
-```{r, echo=FALSE}
-plot(cars)
-```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
