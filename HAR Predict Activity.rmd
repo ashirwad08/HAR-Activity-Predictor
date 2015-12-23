@@ -31,7 +31,7 @@ We'll need a cross validation set, since the testing set is provided separately,
 
 So, let's read in data, and create a Cross Validation set:  
 
-```{r}
+```{r testtrain}
 raw <- read.csv(train.url, header = T, na.strings = c(""," ","#DIV/0!","NA"))
 
 trainInds <- createDataPartition(raw$classe, p=.7, list = F)
@@ -40,7 +40,7 @@ cv <- raw[-trainInds, -c(1:5)]
 
 ```  
 
-Exploratory steps:  
+# Exploratory steps:  
 
 * Get a handle on numerics, discrete, continuous variables
 * What can we remove?
@@ -52,7 +52,7 @@ Exploratory steps:
 ** Collinearity checks (VIF?)
 ** PCA on similar measures?
 
-```{r}
+```{r eda}
 # training set cleaning and analysis
 # consider removing NZVs
 train <- train[,-nearZeroVar(train, saveMetrics = F)]
@@ -61,9 +61,23 @@ train <- train[,-nearZeroVar(train, saveMetrics = F)]
 # more than 80% of the values are unknown.
 train <- train[, -which(colSums(is.na(train))/nrow(train) > 0.8)]
 
+# This pretty much got rid of all NAs. Looks like we don't need any imputing
+# knnimpute of NAs?
 
-```
+# Remove low correlation items?
+ggpairs(data=train, columns=c(grep(".*(magnet_belt).*",colnames(train),value = F),54))
 
+# Might want to center and scale
 
+```  
+
+# Training Models  
+
+## Support Vector Machine w/ Gaussian Kernel 
+## Random Forest
+
+# Cross Validation  
+## Confusion Matrix
+## ROC
 
 
