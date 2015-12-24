@@ -5,7 +5,7 @@ date: "December 21, 2015"
 output: html_document
 ---  
 
-```{r global ECHO=FALSE, message=FALSE, warning=FALSE, error=FALSE}
+```{r global, ECHO=FALSE, message=FALSE, warning=FALSE, error=FALSE}
 library(caret)
 library(ggplot2)
 library(GGally)
@@ -35,7 +35,9 @@ So, let's read in data, and create a Cross Validation set:
 raw <- read.csv(train.url, header = T, na.strings = c(""," ","#DIV/0!","NA"))
 
 trainInds <- createDataPartition(raw$classe, p=.7, list = F)
-train <- raw[trainInds, -c(1:5)] #names, ids, timestamps aren't good predictors
+#names, ids aren't likely predictors
+#timestamps aren't in a good series, removing
+train <- raw[trainInds, -c(1:5)] 
 cv <- raw[-trainInds, -c(1:5)]
 
 ```  
@@ -58,16 +60,36 @@ cv <- raw[-trainInds, -c(1:5)]
 train <- train[,-nearZeroVar(train, saveMetrics = F)]
 
 # Impute NAs; NZV has also removed some NAs. I want to remove variables where
-# more than 80% of the values are unknown.
-train <- train[, -which(colSums(is.na(train))/nrow(train) > 0.8)]
+# more than 75% of the values are unknown.
+train <- train[, -which(colSums(is.na(train))/nrow(train) > 0.75)]
 
 # This pretty much got rid of all NAs. Looks like we don't need any imputing
 # knnimpute of NAs?
 
 # Remove low correlation items?
-ggpairs(data=train, columns=c(grep(".*(magnet_belt).*",colnames(train),value = F),54))
+# ggpairs(data=train, columns=c(grep(".*(magnet_belt).*",colnames(train),value = F),54))
+# Although we're not too concerned about multi-collinearity between predictors because we're going to be using classification trees, we still want to remove predictors that are very highly correlated to each other, by at least 95%
+train.cor <- cor(train[,-54])
+high.train.cor <- findCorrelation(train.cor, 0.95)
+#visualize correlations
+ggpairs(data=train, columns=high.train.cor,54)
+train <- train[,-high.train.cor]
 
-# Might want to center and scale
+# not trying pca since we've removed some based on high correlations
+```  
+
+# BUILDING AND TUNING MODELS  
+
+```{r train}
+library(doMC)
+# Might want to center and scale, want to try different algorithms
+fit.bag <- train(classe~., data=train, preProcess=c('center','scale'), 
+                   method="bagFDA", trControl = trainControl(
+                           method="boot",
+                           number = 5,
+                           repeats = 3,
+                           allowParallel = TRUE
+                   ))
 
 ```  
 
