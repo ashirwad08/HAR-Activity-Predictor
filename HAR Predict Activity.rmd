@@ -7,10 +7,7 @@ output: html_document
 
 ```{r global, ECHO=FALSE, message=FALSE, warning=FALSE, error=FALSE}
 library(caret)
-library(ggplot2)
 library(GGally)
-library(foreach)
-library(doParallel)
 train.url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
 test.url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
 ```  
@@ -27,79 +24,109 @@ The link and the project are here: http://groupware.les.inf.puc-rio.br/har
 
 Training data is at: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv  
 
-We'll need a cross validation set, since the testing set is provided separately, here: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+In order to get an idea of the _out of sample_ error we'll need a seperate, untouched cross validation set.  
 
-So, let's read in data, and create a Cross Validation set:  
-
-```{r testtrain}
+```{r read_testtrain}
 raw <- read.csv(train.url, header = T, na.strings = c(""," ","#DIV/0!","NA"))
 
+set.seed(31412)
 trainInds <- createDataPartition(raw$classe, p=.7, list = F)
 #names, ids aren't likely predictors
 #timestamps aren't in a good series, removing
-train <- raw[trainInds, -c(1:5)] 
-cv <- raw[-trainInds, -c(1:5)]
-
+train <- raw[trainInds, ] 
+cv <- raw[-trainInds, ]
 ```  
 
-# Exploratory steps:  
+## Exploratory Feature Analysis  
 
-* Get a handle on numerics, discrete, continuous variables
-* What can we remove?
-** Ids, names and shit
-** Too many NAs
-** Near Zero Variance variables
-* What else can we remove/create on the features?
-** Manual correlations against outcome (scattermatrix) by groups
-** Collinearity checks (VIF?)
-** PCA on similar measures?
+The dataset has 159 potential predictors for the outcome variable "classe". We now explore these potentials to evaluate their suitability for inclusion in the classification exercise. We'll achieve this by evaluating the following:  
 
-```{r eda}
-# training set cleaning and analysis
-# consider removing NZVs
-train <- train[,-nearZeroVar(train, saveMetrics = F)]
+### Non-Relevant Variables  
+We see that the first 5 columns consist of subject ids, names, and activity timestamps. We eliminate these because they aren't likely contributors to the statistical model.  
+```{r eda_nonrelevance}
+train <- train[,-c(1:5)]
+cv <- cv[,-c(1:5)]
+```  
 
+### Unknown Values:  
+Since we want to train our model on as complete a dataset as possible, we conduct an exercise to only keep features where at least 70% of the values are _known_.  
+```{r eda_unknowns}
 # Impute NAs; NZV has also removed some NAs. I want to remove variables where
-# more than 75% of the values are unknown.
-train <- train[, -which(colSums(is.na(train))/nrow(train) > 0.75)]
+# more than 70% of the values are unknown.
+train <- train[, -which(colSums(is.na(train))/nrow(train) > 0.70)]
 
-# This pretty much got rid of all NAs. Looks like we don't need any imputing
-# knnimpute of NAs?
+```   
 
-# Remove low correlation items?
-# ggpairs(data=train, columns=c(grep(".*(magnet_belt).*",colnames(train),value = F),54))
-# Although we're not too concerned about multi-collinearity between predictors because we're going to be using classification trees, we still want to remove predictors that are very highly correlated to each other, by at least 95%
+#### Imputing Unknowns  
+For the remaining unknowns we choose an "knnImpute" method to estimate the missing values. This helps preserve valuable features that might otherwise have been lost to the analysis on account of missing data.  
+
+### Lack of Variance  
+Features, especially discrete types, that exhibit near zero variability will not inform the analysis. It's therefore prudent to remove these features from the analysis. In order to do so, we make use of the caret package's _nearZeroVar()_ method. It disqualifies features based on the following criteria, as listed in its vignette:  
+* they (potential predictors) have very few unique values relative to the number of samples,  
+* the ratio of the frequency of the most common value to the frequency of the second most common value is large.  
+
+```{r eda_nzv}
+train <- train[,-nearZeroVar(train, saveMetrics = F)]
+```  
+
+### Multicollinearity of Features  
+Finally, although the plan is to use _classification tree_ based algorithms for the analysis, and these typically do well with co-dependent features, we want to remove features that exhibit a very high degree of correlation between each other. This will help in eliminating additional superfluous features and optimize the training time.
+
+```{r multicollinearity}
 train.cor <- cor(train[,-54])
 high.train.cor <- findCorrelation(train.cor, 0.95)
 #visualize correlations
 ggpairs(data=train, columns=high.train.cor,54)
 train <- train[,-high.train.cor]
-
-# not trying pca since we've removed some based on high correlations
-```  
+```   
 
 # BUILDING AND TUNING MODELS  
 
+## Model 1: Bagged FDA  
+
 ```{r train}
 library(doMC)
+registerDoMC(cores=8)
 # Might want to center and scale, want to try different algorithms
-fit.bag <- train(classe~., data=train, preProcess=c('center','scale'), 
-                   method="bagFDA", trControl = trainControl(
-                           method="boot",
-                           number = 5,
-                           repeats = 3,
-                           allowParallel = TRUE
-                   ))
+system.time(
+bagFDA.fit <- train(classe~., data=train, preProcess=c('center','scale'), 
+                   method="bagFDA")
+)
 
 ```  
+## Model 2: Random Forest  
 
-# Training Models  
+## Model 3: Support Vector Machine  
 
-## Support Vector Machine w/ Gaussian Kernel 
-## Random Forest
+```{r svmTrain}
+library(doMC)
+registerDoMC(cores=8)
+system.time(
+        svm.fit <- train(classe~., data=train,
+                         preProcess=c('center','scale'),
+                         method='svmRadial',
+                         tuneLength=5)
+        
+)
+```
 
-# Cross Validation  
-## Confusion Matrix
-## ROC
+
+# PREDICTING AND CROSS VALIDATING RESULTS 
+
+We first predict results on our untouched cross validation set by each model trained. Then we evaluate the prediction accuracy by using a confusion metric and ROC curves.
+
+```{r predcv}
+models <- list(bagFDA.fit, svm.fit)
+pred <- predict(models, newdata=cv)
+predValues <- extractPrediction(models, testX = cv, testY = cv$classe)
+testValues <- subset(predValues, dataType=='Test')
+probValues <- extractProb(models, testX = cv, testY = cv$classe)
+testProbs <- subset(probValues, dataType=='Test')
+plotClassProbs(testProbs)
+```
+
+
+
+
 
 
