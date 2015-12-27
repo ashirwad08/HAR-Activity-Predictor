@@ -16,11 +16,12 @@ test.url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
 
 # OVERVIEW  
 
-This HAR analysis aims to predict the type of activity performed by subjects wearing a wearable computing device. The type of activity to be determined will fall into 5 classes:  
-* A: exactly according to the specification, 
-* B: throwing the elbows to the front, 
-* C: lifting the dumbbell only halfway, 
-* D: lowering the dumbbell only halfway, 
+This HAR analysis aims to predict the type of activity performed by subjects wearing a wearable computing device. The type of activities fall into 5 classes:   
+
+* A: exactly according to the specification,  
+* B: throwing the elbows to the front,  
+* C: lifting the dumbbell only halfway,  
+* D: lowering the dumbbell only halfway,   
 * E: throwing the hips to the front.  
 
 The dataset provided by [this project](http://groupware.les.inf.puc-rio.br/har) will be used to train a few classification models to attempt to determine the likelihood of the activity. The results of each model will be evaluated against a separate cross validation (testing) dataset that has not been included in training the models.  
@@ -183,6 +184,10 @@ We see that the Random Forest algorithm with a `r confusionMatrix(pred.rf, cv$cl
 ```{r echo=FALSE}
  rf.fit$finalModel
 ```  
+
+
+End.  
+---
 
 
 
