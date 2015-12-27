@@ -1,5 +1,5 @@
 ---
-title: "HAR Predict Activity"
+title: "HAR: Predict Activity"
 author: "Ash Chakraborty"
 date: "December 26, 2015"
 output: 
@@ -11,14 +11,16 @@ output:
 ```{r global, ECHO=TRUE, message=FALSE, warning=FALSE, error=FALSE}
 library(knitr)
 library(caret)
-library(GGally)
+library(ggplot2)
+#library(GGally)
 train.url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
 test.url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
 ```  
 
-# OVERVIEW - "Human Activity Recognition" (HAR)
+# OVERVIEW  
 
-This analysis aims to predict the type of activity performed by subjects wearing a wearable computing device.   The type of activity to be determined will fall into 5 classes:  
+This analysis aims to predict the type of activity performed by subjects wearing a wearable computing device. The type of activity to be determined will fall into 5 classes:  
+
 * A: exactly according to the specification, 
 * B: throwing the elbows to the front, 
 * C: lifting the dumbbell only halfway, 
@@ -31,49 +33,36 @@ The dataset provided by [this project](http://groupware.les.inf.puc-rio.br/har) 
 
 We begin by reading in the raw data provided from the project. The dataset has 159 potential predictors for the outcome variable "classe".  
 
-```{r read_raw, cache=TRUE}
+```{r read_raw, cache=TRUE, message=FALSE, warning=FALSE, error=FALSE}
 raw <- read.csv(train.url, header = T, na.strings = c(""," ","#DIV/0!","NA"))
 dim(raw)
 ```  
 
-## Eliminating Ineffective Variables  
+## Pre-Processing Data  
 
-We now explore these potential predictors to evaluate their suitability for inclusion in the classification exercise. We'll achieve this by evaluating the following:  
+We now explore these potential predictors to evaluate their suitability for inclusion in the classification exercise. We see that the first 5 columns consist of subject ids, names, and activity timestamps. We eliminate these because they aren't likely contributors to the models. Further, since we want to train our models on as complete a dataset as possible, we conduct an exercise to only keep features where at least 75% of the values are _known_.  
 
-### Non-Relevant Variables:  
-We see that the first 5 columns consist of subject ids, names, and activity timestamps. We eliminate these because they aren't likely contributors to the models.  
-```{r eda_nonrelevance}
+
+```{r eda1, message=FALSE, warning=FALSE, error=FALSE}
 raw <- raw[,-c(1:5)]
-```  
-
-### Unknown Values:  
-Since we want to train our models on as complete a dataset as possible, we conduct an exercise to only keep features where at least 75% of the values are _known_.  
-```{r eda_unknowns}
 raw <- raw[, -which(colSums(is.na(raw))/nrow(raw) > 0.75)]
+dim(raw)
 ```   
 
-#### Imputing Unknowns  
-For the remaining unknowns we choose an "knnImpute" method to estimate the missing values. This helps preserve valuable features that might otherwise have been lost to the analysis on account of missing data.  
+Quite a few variables were eliminated because of extremely sparse data. For the remaining unknowns we choose an "knnImpute" method to estimate the missing values. This will be performed as part of the pre-processing of the training set before running it through an algorithm.
 
-### Lack of Variance  
-Features, especially discrete types, that exhibit near zero variability will not inform the analysis. It's therefore prudent to remove these features from the analysis. In order to do so, we make use of the caret package's _nearZeroVar()_ method. It disqualifies features based on the following criteria, as listed in its vignette:  
-* they (potential predictors) have very few unique values relative to the number of samples,  
-* the ratio of the frequency of the most common value to the frequency of the second most common value is large.  
-
-```{r eda_nzv}
-raw <- raw[,-nearZeroVar(raw, saveMetrics = F)]
-```  
 
 ### Multicollinearity of Features  
-Finally, although the plan is to use _classification tree_ based algorithms for the analysis, and these typically do well with co-dependent features, we want to remove features that exhibit a very high degree of correlation (greater than 95%) between each other. This will help in eliminating additional superfluous features and optimize the training time.
+Although the plan is to use _classification tree_ based algorithms for the analysis, and these typically do well with co-dependent features, we want to remove features that exhibit a very high degree of correlation (greater than 95%) between each other. This will help in eliminating additional superfluous features and optimize the training time.
 
-```{r multicollinearity}
+```{r multicollinearity, message=FALSE, warning=FALSE, error=FALSE}
 raw.cor <- cor(raw[,-ncol(raw)])
 high.train.cor <- findCorrelation(raw.cor, 0.95)
 
 # visualize highly correlated features
-#ggpairs(data=train, columns=high.train.cor)
-
+featurePlot(x=raw[,high.train.cor], y=raw$classe,
+            plot='pairs',
+            auto.key=list(columns=5))
 # get rid of those with >95% collinearity
 raw <- raw[,-high.train.cor]
 ```   
@@ -81,10 +70,10 @@ raw <- raw[,-high.train.cor]
 
 ## Data Partitioning  
 
-Now that we've accounted for most of the missing data and multicollinearity, we'll split the dataset into our a train and test (cross validation) dataset. This'll ensure that the same features are used in training as well as during validation, while the model is trained **only** on the training set.  
+Now that we've accounted for most of the missing data and multicollinearity, we'll split the dataset into our a train and test (cross validation) dataset. This'll ensure that the same features are used in training as well as during validation, while the model is trained **only** on the training set. 
 
-```{r test_train}
-#set.seed(31415)
+```{r test_train, message=FALSE, warning=FALSE, error=FALSE}
+set.seed(31415)
 trainInds <- createDataPartition(raw$classe, p=.7, list = F)
 train <- raw[trainInds, ] 
 cv <- raw[-trainInds, ]
@@ -95,22 +84,21 @@ test <- read.csv(test.url, header = T, na.strings = c(""," ","#DIV/0!","NA"))
 
 # BUILDING AND TUNING MODELS  
 
-We now apply various classification algorithms to our training dataset. Each training model will be run in a parallelized fashion with tuning parameters that enable multiple cross fold validation. This will help determine the accuracy of the final model. Note: I pre-process the training set by centering and scaling before training each model. This is to account for the differences in scales between some features in teh dataset.  
+We now apply various classification algorithms to our training dataset. Each training model will be run in a parallelized fashion with tuning parameters that enable multiple cross fold validation. This will help determine the accuracy of the final model. Note: I pre-process the training set by centering and scaling before training each model. This is to account for the differences in scales between some features in teh dataset. Moreover, features, especially discrete types, that exhibit near zero variability will not inform the analysis. It's therefore prudent to remove these features from the analysis, in addition to centering and scaling the training sets.  
 
 
 ## Model 1: Recursive Partitioning  
 We'll start by using a classification tree to try and find the decision points in the dataset.The aim here is to try and find the decision points that best split the data until we arrive at homogenous activities. We use repeated cross validation as our accuracy metric to arrive at average predictions on multiple runs.  
 
 
-```{r bagTrain, cache=TRUE}
+```{r bagTrain, cache=TRUE, message=FALSE, warning=FALSE, error=FALSE}
+# enable parallelization 
 library(doMC)
 registerDoMC(cores=8)
 # Might want to center and scale, want to try different algorithms
 system.time(
-        rpart.fit <- train(classe~., data=train, preProcess=c('center','scale'), 
-                           method="rpart"
-                           
-                           )
+        rpart.fit <- train(classe~., data=train, preProcess=c('center','scale','nzv','knnImpute'), 
+                           method="rpart")
 )
 rpart.fit
 ```  
@@ -120,40 +108,40 @@ We see Recursive Partitioning has a very poor classification accuracy on the tra
 We'll next run a random forest classifier to try and improve the accuracy of the partitioning algorithm. Perhaps randomizing the walk down various trees in teh dataset will offer better insights into the partitioning.  
 
 
-```{r rfTrain, cache=TRUE}
+```{r rfTrain, cache=TRUE, message=FALSE, warning=FALSE, error=FALSE}
 library(doMC)
 registerDoMC(cores = 8)
 system.time(
-        rf.fit <- train(classe~., data=train, preProcess=c('center','scale'),
+        rf.fit <- train(classe~., data=train, preProcess=c('center','scale','nzv','knnImpute'),
                         method="rf", 
                         prox = TRUE, 
                         trControl = trainControl(
                                 method = "repeatedcv",
-                                number = 3,
-                                repeats = 3
+                                number = 2,
+                                repeats = 1
                         )
         )
 )
 rf.fit
 ```   
-The random forest's accuracy is a big improvement of the partitioning algorithm run earlier. 
+The random forest's accuracy is a big improvement over the partitioning algorithm run earlier. 
 
 ## Model 3: Support Vector Machine  
-Now, since we have a good chunk of data, with > 10-20 features, a Support Vector Machine classifier might help in determining a good classification boundary between the various outcome classes. The support vector machine improves on logistic regression by using the mapping function: ..... goes here ..... . In addition, this algorithm will compute the Gaussian Kernel, which is the approximate distance between each class and its outcome.  The "tuneLength" parameter expands the range of _regularization_ values that the SVM may be run against (0.1 to 1000).  
+Now, since we have a good chunk of data, with > 10-20 features, a Support Vector Machine classifier might help in determining a good classification boundary between the various outcome classes. The support vector machine improves on logistic regression by using the the Gaussian Kernel, which is the approximate distance between each class and its outcome.  The "tuneLength" parameter expands the range of _regularization_ values that the SVM may be run against (0.1 to 1000).  
 
 
-```{r svmTrain, cache=TRUE}
+```{r svmTrain, cache=TRUE, message=FALSE, warning=FALSE, error=FALSE}
 library(doMC)
 registerDoMC(cores=8)
 system.time(
         svm.fit <- train(classe~., data=train,
-                         preProcess=c('center','scale'),
+                         preProcess=c('center','scale','nzv','knnImpute'),
                          method='svmRadial',
                          tuneLength=5,
                          trControl = trainControl(
                                 method = "repeatedcv",
-                                number = 3,
-                                repeats = 3
+                                number = 2,
+                                repeats = 2
                                 )
                          )
         
