@@ -2,7 +2,10 @@
 title: "HAR Predict Activity"
 author: "Ash Chakraborty"
 date: "December 21, 2015"
-output: html_document
+output: 
+  html_document: 
+    theme: cosmo
+    toc: yes
 ---  
 
 ```{r global, ECHO=FALSE, message=FALSE, warning=FALSE, error=FALSE}
@@ -14,47 +17,42 @@ test.url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
 
 # OVERVIEW  
 
-"Human Activity Recognition" (HAR) exercise. Use data collected from a wearable
-device to train a couple of machine learning models so that they can "learn" to
-predict the "type" of activity ('classe') given a test data set.  
+This analysis aims to predict the type of activity performed by subjects wearing a "Human Activity Recognition" (HAR) enabled device. The type of activity to be determined will fall into 5 classes:  
+* Sitting-down  
+* Sitting  
+* Standing-up  
+* Standing  
+* Walking  
 
-The link and the project are here: http://groupware.les.inf.puc-rio.br/har
+The dataset provided by [this project](http://groupware.les.inf.puc-rio.br/har) will be used to train a few classification models to attempt to determine the likelihood of the activity. Some exploratory analysis will first need to be performed in order to select appropriate predictors. The results of each model will then be evaluated against a cross validation dataset that has not been included in training the models.  
+
 
 # DATA PREVIEW  
 
-Training data is at: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv  
+In order to get an idea of the _out of sample_ error we'll need a seperate, untouched cross validation set. We begin by reading in the raw data provided from the project.  
 
-In order to get an idea of the _out of sample_ error we'll need a seperate, untouched cross validation set.  
-
-```{r read_testtrain}
+```{r read_raw, cache=TRUE}
 raw <- read.csv(train.url, header = T, na.strings = c(""," ","#DIV/0!","NA"))
-
-set.seed(31412)
-trainInds <- createDataPartition(raw$classe, p=.7, list = F)
-#names, ids aren't likely predictors
-#timestamps aren't in a good series, removing
-train <- raw[trainInds, ] 
-cv <- raw[-trainInds, ]
 ```  
 
-## Exploratory Feature Analysis  
+## Identifying Superflous Variables - Eliminating Features  
 
 The dataset has 159 potential predictors for the outcome variable "classe". We now explore these potentials to evaluate their suitability for inclusion in the classification exercise. We'll achieve this by evaluating the following:  
 
 ### Non-Relevant Variables  
 We see that the first 5 columns consist of subject ids, names, and activity timestamps. We eliminate these because they aren't likely contributors to the statistical model.  
 ```{r eda_nonrelevance}
-train <- train[,-c(1:5)]
-cv <- cv[,-c(1:5)]
+raw <- raw[,-c(1:5)]
+#train <- train[,-c(1:5)]
+#cv <- cv[,-c(1:5)]
 ```  
 
 ### Unknown Values:  
-Since we want to train our model on as complete a dataset as possible, we conduct an exercise to only keep features where at least 70% of the values are _known_.  
+Since we want to train our models on as complete a dataset as possible, we conduct an exercise to only keep features where at least 70% of the values are _known_.  
 ```{r eda_unknowns}
 # Impute NAs; NZV has also removed some NAs. I want to remove variables where
 # more than 70% of the values are unknown.
-train <- train[, -which(colSums(is.na(train))/nrow(train) > 0.70)]
-
+raw <- raw[, -which(colSums(is.na(raw))/nrow(raw) > 0.70)]
 ```   
 
 #### Imputing Unknowns  
@@ -66,64 +64,119 @@ Features, especially discrete types, that exhibit near zero variability will not
 * the ratio of the frequency of the most common value to the frequency of the second most common value is large.  
 
 ```{r eda_nzv}
-train <- train[,-nearZeroVar(train, saveMetrics = F)]
+raw <- raw[,-nearZeroVar(raw, saveMetrics = F)]
 ```  
 
 ### Multicollinearity of Features  
 Finally, although the plan is to use _classification tree_ based algorithms for the analysis, and these typically do well with co-dependent features, we want to remove features that exhibit a very high degree of correlation between each other. This will help in eliminating additional superfluous features and optimize the training time.
 
 ```{r multicollinearity}
-train.cor <- cor(train[,-54])
-high.train.cor <- findCorrelation(train.cor, 0.95)
+raw.cor <- cor(raw[,-ncol(raw)])
+high.train.cor <- findCorrelation(raw.cor, 0.95)
 #visualize correlations
-ggpairs(data=train, columns=high.train.cor,54)
-train <- train[,-high.train.cor]
+#ggpairs(data=train, columns=high.train.cor,54)
+#train <- train[,-high.train.cor]
 ```   
+
+Now that we've accounted for most of the missing data and variability, we'll split the dataset into our test and cross validation (cv) datasets. This'll ensure that the same features are used in training as well as during validation, while the model is trained **only** on the training set.  
+
+```{r test_train}
+set.seed(31415)
+trainInds <- createDataPartition(raw$classe, p=.7, list = F)
+train <- raw[trainInds, ] 
+cv <- raw[-trainInds, ]
+```  
+
 
 # BUILDING AND TUNING MODELS  
 
-## Model 1: Bagged FDA  
+We now apply various classification algorithms to our training dataset. Each training model will be run in a parallelized fashion with tuning parameters that enable multiple cross fold validation. This will help determine the accuracy of the final model. Note: I pre-process the training set by centering and scaling beore training the model. This is to account for the differences in scales between some features in teh dataset.  
 
-```{r train}
+
+## Model 1: Recursive Partitioning  
+We'll start by using a classification tree to try and find the decision points in the dataset. Since I'm not very familiar with the science of the dataset, the aim here is to try and find the decision points that best split the data until we arrive at homogenous activities. We use repeated cross validation as our accuracy metric to arrive at average predictions on multiple runs.  
+
+
+```{r bagTrain, cache=TRUE}
 library(doMC)
 registerDoMC(cores=8)
 # Might want to center and scale, want to try different algorithms
 system.time(
-bagFDA.fit <- train(classe~., data=train, preProcess=c('center','scale'), 
-                   method="bagFDA")
+        rpart.fit <- train(classe~., data=train, preProcess=c('center','scale'), 
+                           method="rpart",
+                           trControl = trainControl(
+                                        method = "repeatedcv",
+                                        number = 5,
+                                        repeats = 3)
+                           )
 )
-
+rpart.fit
 ```  
+
 ## Model 2: Random Forest  
+We'll next run a random forest classifier to try and improve the accuracy of the partitioning algorithm. Perhaps randomizing the walk down various trees in teh dataset will offer better insights into the partitioning.  
+
+
+```{r rfTrain, cache=TRUE}
+library(doMC)
+registerDoMC(cores = 8)
+system.time(
+        rf.fit <- train(classe~., data=train, preProcess=c('center','scale'),
+                        method="rf", 
+                        prox = TRUE, 
+                        trControl = trainControl(
+                                method = "repeatedcv",
+                                number = 5,
+                                repeats = 3
+                        )
+        )
+)
+rf.fit
+```   
+The random forest's accuracy is a big improvement of the partitioning algorithm run earlier. Now, since we have a good chunk of data, with > 10-20 features, a Support Vector Machine classifier might help in determining a good classification boundary between the various outcome classes. The support vector machine improves on logistic regression by using the mapping function: ..... goes here ..... . In addition, this algorithm will compute the Gaussian Kernel, which is the approximate distance between each class and its outcome.  The "tuneLength" parameter expands the range of _regularization_ values that the SVM may be run against (0.1 to 1000)
 
 ## Model 3: Support Vector Machine  
 
-```{r svmTrain}
+```{r svmTrain, cache=TRUE}
 library(doMC)
 registerDoMC(cores=8)
 system.time(
         svm.fit <- train(classe~., data=train,
                          preProcess=c('center','scale'),
                          method='svmRadial',
-                         tuneLength=5)
+                         tuneLength=5,
+                         trControl = trainControl(
+                                method = "repeatedcv",
+                                number = 5,
+                                repeats = 3
+                                )
+                         )
         
 )
-```
-
+svm.fit
+```  
 
 # PREDICTING AND CROSS VALIDATING RESULTS 
 
-We first predict results on our untouched cross validation set by each model trained. Then we evaluate the prediction accuracy by using a confusion metric and ROC curves.
+## Predicted Probabilities  
+
+Let's take a look at the prediction probability distributions generated by each model on our untouched cross validation set. 
 
 ```{r predcv}
-models <- list(bagFDA.fit, svm.fit)
+models <- list(fit1, rf.fit, svm.fit)
 pred <- predict(models, newdata=cv)
 predValues <- extractPrediction(models, testX = cv, testY = cv$classe)
 testValues <- subset(predValues, dataType=='Test')
 probValues <- extractProb(models, testX = cv, testY = cv$classe)
 testProbs <- subset(probValues, dataType=='Test')
 plotClassProbs(testProbs)
-```
+```  
+We see that the Random Forest and SVMs give us very low Out of Sample errors as compared to the Recursive Partitioning algorithm. 
+
+## Confusion Matrix  
+
+
+
 
 
 
