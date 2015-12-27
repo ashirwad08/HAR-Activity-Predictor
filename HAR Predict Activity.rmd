@@ -9,10 +9,7 @@ output:
 ---  
 
 ```{r global, ECHO=TRUE, message=FALSE, warning=FALSE, error=FALSE}
-library(knitr)
 library(caret)
-library(ggplot2)
-library(GGally)
 train.url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
 test.url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
 ```  
@@ -64,17 +61,17 @@ train <- raw[trainInds, ]
 cv <- raw[-trainInds, ]
 ```  
 
-In order to get an idea of the spatial orientation features with the outcome, let's look at a scatterplot of the Total Measurements with the Classe outcome.  
+In order to get an idea of the dumbell orientation features with the outcome, let's look at a scatterplot of the Total Measurements with the Classe outcome.  
 
-```{r viz1, echo=FALSE, message=FALSE, warning=FALSE, error=FALSE}
+```{r viz1, echo=FALSE, message=FALSE, warning=FALSE, error=FALSE, fig.width=7, fig.height=9}
 library(GGally)
 ggpairs(data=train, columns=c(grep(".*(total).*",colnames(train),value = F),ncol(train)), title = "Measurement Totals and Classe", upper = list(continuous='density', combo='box'), lower = list(continuous='points', combo='dot'))
 ```  
 
-We see that each of the total measurements have small correlations to the Classe outcome. For e.g. while the __total_accel_belt__ measurement seems to have a lot of data indicating classe A, it's not so well correlated with the other classes.  
+We see that each of the total measurements have small correlations to the Classe outcome. For e.g. while the _totalaccelbelt_ measurement seems to have a lot of data indicating classe A, it's not so well correlated with the other classes.  
 
 
-# BUILDING AND TUNING MODELS  
+# PRE-PROCESSING, BUILDING AND TUNING MODELS  
 
 We now apply various classification algorithms to our training dataset. Each training model will be run in a parallelized fashion with tuning parameters that enable multiple cross fold validation. This will help determine the accuracy of the final model.  
 
@@ -116,7 +113,7 @@ system.time(
                         trControl = trainControl(
                                 method = "repeatedcv",
                                 number = 5,
-                                repeats = 3,
+                                repeats = 5,
                                allowParallel = TRUE
                         )
         )
@@ -128,11 +125,11 @@ The random forest's accuracy is a big improvement over the partitioning algorith
 plot(rf.fit)
 ```  
 
-We see that an expected accuracy of `r max(rf.fit$results[,2])*100`% from the random forest algorithm is reasonable. This gives us an Out of Sample error rate that we can expect: `r  1-max(rf.fit$results[,2])`%.
+From this, and taking the average across all runs, we get an *expected accuracy* of `r mean(rf.fit$results[,2])*100`% from the random forest algorithm. This gives us an *Expected Out of Sample error rate*: `r  1-mean(rf.fit$results[,2])`%.
 
 
 ## Model 3: Support Vector Machine  
-Now, since we have a good chunk of data, with > 10-20 features, a Support Vector Machine classifier might help in determining a good classification boundary between the various outcome classes. The support vector machine improves on logistic regression by using the the Gaussian Kernel, which is the approximate distance between each class and its outcome.  The "tuneLength" parameter expands the range of _regularization_ values that the SVM may be run against (0.1 to 1000).  
+Now, since we have a good chunk of data, with > 10-20 features, a Support Vector Machine classifier might help in determining a good classification boundary between the various outcome classes. The support vector machine improves on logistic regression by using the the Gaussian Kernel; it constructs a set of hyperplanes in a high dimensional space, which can be used for classification. Intuitively, a good separation is achieved by the hyperplane that has the largest distance to the nearest training-data point of any class. The "tuneLength" parameter expands the range of _regularization_ values that the SVM may be run against (0.1 to 1000).  
 
 
 ```{r svmTrain, cache=TRUE, message=FALSE, warning=FALSE, error=FALSE}
@@ -146,7 +143,7 @@ system.time(
                          trControl = trainControl(
                                 method = "repeatedcv",
                                 number = 10,
-                                repeats = 3,
+                                repeats = 5,
                              allowParallel = TRUE
                                 )
                          )
@@ -161,7 +158,7 @@ Finally, we see how the SVM behaves with repeated cross fold validation, when co
 plot(svm.fit)
 ```  
 
-We see that an expected accuracy of `r max(svm.fit$results[,2])*100`% from the SVM is reasonable. This gives us an Out of Sample error rate that we can expect: `r  1-max(svm.fit$results[,2])`%. 
+We see that an *expected accuracy* of `r max(svm.fit$results[,3])*100`% from the SVM is reasonable, at the most optimal regularization parameter. This gives us an Out of Sample error rate that we can expect: `r  1-max(svm.fit$results[,3])`%. 
 
 
 # PREDICTING and VALIDATING RESULTS  
@@ -175,13 +172,14 @@ pred.rpart <- predict(rpart.fit, newdata=cv)
 pred.rf <- predict(rf.fit, newdata=cv)
 pred.svm <- predict(svm.fit, newdata=cv)
 
- confusionMatrix(pred.rpart, cv$classe)
- confusionMatrix(pred.rf, cv$classe)
- confusionMatrix(pred.svm, cv$classe)
+ confusionMatrix(pred.rpart, cv$classe) # CART, recursive partitioning
+ confusionMatrix(pred.rf, cv$classe) # Random Forest
+ confusionMatrix(pred.svm, cv$classe) # Support Vector Machine
 
 ```  
 
-We see that the Random Forest algorithm with a `r confusionMatrix(pred.rf, cv$classe)$overall[1]*100`% accuracy on the test set causes the *least* amount of Out of Sample error, when compared to SVM and Recursive Partitioning. We therefore apply the Random Forest model to the course test examples. Final model:  
+We see that the Random Forest algorithm with a `r confusionMatrix(pred.rf, cv$classe)$overall[1]*100`% accuracy on the test set causes the *least* amount of Out of Sample error (`r 1-confusionMatrix(pred.rf, cv$classe)$overall[1]`%), when compared to SVM and Recursive Partitioning. This is within our previously anticipated Out of Sample error. *We therefore select the Random Forest solution (model #2) as the final model.*  
+
 ```{r echo=FALSE}
  rf.fit$finalModel
 ```  
